@@ -1,0 +1,16 @@
+# Environment secrets
+.env
+.env.local
+
+# Python virtual environment
+venv/
+.venv/
+env/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Flutter/Dart
+.dart_tool/
+build/
