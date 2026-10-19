@@ -36,6 +36,7 @@ async def get_weather(
     city: Optional[str] = None,
     lat: Optional[float] = None,
     lon: Optional[float] = None,
+    units: str = "metric",
 ):
     """
     Examples:
@@ -51,7 +52,7 @@ async def get_weather(
 
     params = {
         "appid": API_KEY,
-        "units": "metric",
+        "units": units,
     }
 
     if city:
@@ -90,7 +91,12 @@ async def get_weather(
     }
 
 @app.get("/forecast")
-async def get_forecast(city: Optional[str] = None, lat: Optional[float] = None, lon: Optional[float] = None):
+async def get_forecast(
+    city: Optional[str] = None,
+    lat: Optional[float] = None,
+    lon: Optional[float] = None,
+    units: str = "metric",
+    ):
     """
     Returns a 5-day forecast, grouped by day.
     """
@@ -99,7 +105,7 @@ async def get_forecast(city: Optional[str] = None, lat: Optional[float] = None, 
 
     params = {
         "appid": API_KEY,
-        "units": "metric",
+        "units": units,
     }
 
     if city:

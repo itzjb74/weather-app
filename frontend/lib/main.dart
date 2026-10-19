@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
 import 'package:weather_svg_icons/weather_svg_icons.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() => runApp(const WeatherApp());
 
@@ -58,7 +59,7 @@ class _WeatherAppState extends State<WeatherApp> {
 }
 
 // -----------------------------------------------------------
-// Weather Data Model
+// Weather Data Models
 // -----------------------------------------------------------
 class Weather {
   final String city;
@@ -119,6 +120,32 @@ class Weather {
   }
 }
 
+class ForecastDay {
+  final String date;
+  final double tempMin;
+  final double tempMax;
+  final String icon;
+  final String description;
+
+  ForecastDay({
+    required this.date,
+    required this.tempMin,
+    required this.tempMax,
+    required this.icon,
+    required this.description,
+  });
+
+  factory ForecastDay.fromJson(Map<String, dynamic> json) {
+    return ForecastDay(
+      date: json['date'],
+      tempMin: (json['temp_min'] as num).toDouble(),
+      tempMax: (json['temp_max'] as num).toDouble(),
+      icon: json['icon'],
+      description: json['description'],
+    );
+  }
+}
+
 // -----------------------------------------------------------
 // Main Screen
 // -----------------------------------------------------------
@@ -139,15 +166,45 @@ class WeatherScreen extends StatefulWidget {
 class _WeatherScreenState extends State<WeatherScreen> {
   final TextEditingController _controller = TextEditingController();
   Weather? _weather;
+  List<ForecastDay>? _forecast;
+  List<String> _searchHistory = []; // 👈 NEW
   bool _loading = false;
   String? _error;
 
   @override
   void initState() {
     super.initState();
+    _loadHistory(); // 👈 NEW
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _fetchWeatherByLocation();
     });
+  }
+
+  // 👈 NEW: Load history from local storage
+  Future<void> _loadHistory() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _searchHistory = prefs.getStringList('search_history') ?? [];
+    });
+  }
+
+  // 👈 NEW: Save city to history
+  Future<void> _saveToHistory(String city) async {
+    // Capitalize the city name so it looks nice (e.g., "london" -> "London")
+    final formattedCity = city.trim().isNotEmpty
+        ? city.trim()[0].toUpperCase() + city.trim().substring(1).toLowerCase()
+        : city;
+
+    if (_searchHistory.contains(formattedCity)) return; // Don't add duplicates
+
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _searchHistory.insert(0, formattedCity); // Add to the front of the list
+      if (_searchHistory.length > 5) {
+        _searchHistory = _searchHistory.sublist(0, 5); // Keep only the last 5
+      }
+    });
+    await prefs.setStringList('search_history', _searchHistory);
   }
 
   Future<void> _fetchWeather() async {
@@ -158,22 +215,38 @@ class _WeatherScreenState extends State<WeatherScreen> {
       _loading = true;
       _error = null;
       _weather = null;
+      _forecast = null;
     });
 
     try {
-      final uri = Uri.parse('$baseUrl/weather?city=$city');
-      final response = await http.get(uri).timeout(const Duration(seconds: 10));
+      final weatherUri = Uri.parse('$baseUrl/weather?city=$city');
+      final forecastUri = Uri.parse('$baseUrl/forecast?city=$city');
 
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body) as Map<String, dynamic>;
-        setState(() => _weather = Weather.fromJson(data));
-      } else if (response.statusCode == 404) {
+      final responses = await Future.wait([
+        http.get(weatherUri),
+        http.get(forecastUri),
+      ]);
+
+      final weatherRes = responses[0];
+      final forecastRes = responses[1];
+
+      if (weatherRes.statusCode == 200 && forecastRes.statusCode == 200) {
+        _saveToHistory(city); // 👈 NEW: Save successful search
+
+        final weatherData = jsonDecode(weatherRes.body) as Map<String, dynamic>;
+        final forecastData = jsonDecode(forecastRes.body) as List<dynamic>;
+
+        setState(() {
+          _weather = Weather.fromJson(weatherData);
+          _forecast = forecastData.map((e) => ForecastDay.fromJson(e)).toList();
+        });
+      } else if (weatherRes.statusCode == 404) {
         setState(() => _error = 'City not found');
       } else {
-        setState(() => _error = 'Server error (${response.statusCode})');
+        setState(() => _error = 'Failed to load weather data');
       }
     } catch (e) {
-      setState(() => _error = 'Could not connect. Is the backend running?');
+      setState(() => _error = 'Could not connect to server.');
     } finally {
       setState(() => _loading = false);
     }
@@ -184,6 +257,7 @@ class _WeatherScreenState extends State<WeatherScreen> {
       _loading = true;
       _error = null;
       _weather = null;
+      _forecast = null;
     });
 
     try {
@@ -213,16 +287,31 @@ class _WeatherScreenState extends State<WeatherScreen> {
         desiredAccuracy: LocationAccuracy.low,
       );
 
-      final uri = Uri.parse(
+      final weatherUri = Uri.parse(
         '$baseUrl/weather?lat=${position.latitude}&lon=${position.longitude}',
       );
-      final response = await http.get(uri).timeout(const Duration(seconds: 10));
+      final forecastUri = Uri.parse(
+        '$baseUrl/forecast?lat=${position.latitude}&lon=${position.longitude}',
+      );
 
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body) as Map<String, dynamic>;
-        setState(() => _weather = Weather.fromJson(data));
+      final responses = await Future.wait([
+        http.get(weatherUri),
+        http.get(forecastUri),
+      ]);
+
+      final weatherRes = responses[0];
+      final forecastRes = responses[1];
+
+      if (weatherRes.statusCode == 200 && forecastRes.statusCode == 200) {
+        final weatherData = jsonDecode(weatherRes.body) as Map<String, dynamic>;
+        final forecastData = jsonDecode(forecastRes.body) as List<dynamic>;
+
+        setState(() {
+          _weather = Weather.fromJson(weatherData);
+          _forecast = forecastData.map((e) => ForecastDay.fromJson(e)).toList();
+        });
       } else {
-        setState(() => _error = 'Server error (${response.statusCode})');
+        setState(() => _error = 'Failed to load weather data');
       }
     } catch (e) {
       setState(() => _error = 'Could not get location: $e');
@@ -233,7 +322,6 @@ class _WeatherScreenState extends State<WeatherScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Pass the dark mode state to the gradient function
     final gradientColors = _weather != null
         ? _gradientForTemp(_weather!.temperature, widget.isDarkMode)
         : widget.isDarkMode
@@ -271,6 +359,7 @@ class _WeatherScreenState extends State<WeatherScreen> {
             padding: const EdgeInsets.all(16),
             child: Column(
               children: [
+                // ---- Search Bar ----
                 Row(
                   children: [
                     Expanded(
@@ -299,8 +388,48 @@ class _WeatherScreenState extends State<WeatherScreen> {
                     ),
                   ],
                 ),
+
+                // 👇 NEW: Search History Chips
+                if (_searchHistory.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    height: 35,
+                    child: ListView.builder(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: _searchHistory.length,
+                      itemBuilder: (context, index) {
+                        final city = _searchHistory[index];
+                        return Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: ActionChip(
+                            label: Text(city),
+                            backgroundColor: widget.isDarkMode
+                                ? Colors.white12
+                                : Colors.white54,
+                            side: BorderSide(
+                              color: widget.isDarkMode
+                                  ? Colors.white24
+                                  : Colors.white,
+                            ),
+                            labelStyle: TextStyle(
+                              color: widget.isDarkMode
+                                  ? Colors.white
+                                  : Colors.black87,
+                            ),
+                            onPressed: () {
+                              _controller.text = city;
+                              _fetchWeather(); // Automatically search when tapped
+                            },
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+
                 const SizedBox(height: 24),
 
+                // ---- Content Area ----
                 if (_loading)
                   const Padding(
                     padding: EdgeInsets.only(top: 40),
@@ -319,8 +448,14 @@ class _WeatherScreenState extends State<WeatherScreen> {
                       textAlign: TextAlign.center,
                     ),
                   )
-                else if (_weather != null)
-                  _WeatherCard(weather: _weather!),
+                else if (_weather != null && _forecast != null)
+                  Column(
+                    children: [
+                      _WeatherCard(weather: _weather!),
+                      const SizedBox(height: 16),
+                      _ForecastList(forecast: _forecast!),
+                    ],
+                  ),
               ],
             ),
           ),
@@ -428,7 +563,7 @@ String _formatVisibility(int meters) {
 }
 
 // -----------------------------------------------------------
-// Weather Card (Updated for Dark Mode Glassmorphism)
+// Weather Card
 // -----------------------------------------------------------
 class _WeatherCard extends StatelessWidget {
   final Weather weather;
@@ -437,14 +572,11 @@ class _WeatherCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    // Text color that adapts (Black for light mode, White for dark mode)
     final textColor = isDark ? Colors.white : Colors.black87;
     final subTextColor = isDark ? Colors.grey[400] : Colors.grey[700];
 
     return Container(
       decoration: BoxDecoration(
-        // Glassmorphism effect: transparent white in light mode, transparent black in dark mode
         color: isDark
             ? Colors.black.withValues(alpha: 0.4)
             : Colors.white.withValues(alpha: 0.85),
@@ -575,6 +707,92 @@ class _WeatherCard extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// -----------------------------------------------------------
+// Forecast List Widget
+// -----------------------------------------------------------
+class _ForecastList extends StatelessWidget {
+  final List<ForecastDay> forecast;
+  const _ForecastList({required this.forecast});
+
+  String _getDayName(String dateStr) {
+    final date = DateTime.parse(dateStr);
+    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    return days[date.weekday - 1];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Container(
+      height: 140,
+      decoration: BoxDecoration(
+        color: isDark
+            ? Colors.black.withValues(alpha: 0.4)
+            : Colors.white.withValues(alpha: 0.85),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.1)
+              : Colors.transparent,
+        ),
+      ),
+      child: ListView.builder(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        itemCount: forecast.length,
+        itemBuilder: (context, index) {
+          final day = forecast[index];
+          return Container(
+            width: 80,
+            margin: const EdgeInsets.only(right: 12),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  _getDayName(day.date),
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: isDark ? Colors.white : Colors.black87,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                WeatherSvgIcon.byCode(
+                  _mapToWmoCode(day.icon),
+                  isDay: day.icon.endsWith('d'),
+                  size: 40,
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      '${day.tempMax.toStringAsFixed(0)}°',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: isDark ? Colors.white : Colors.black87,
+                      ),
+                    ),
+                    Text(
+                      ' ${day.tempMin.toStringAsFixed(0)}°',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: isDark ? Colors.grey[400] : Colors.grey[600],
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          );
+        },
       ),
     );
   }
