@@ -155,3 +155,35 @@ async def get_forecast(
     # Convert dictionary to a sorted list and return the next 5 days
     forecast_list = list(daily_data.values())
     return forecast_list[:5]
+
+@app.get("/air_pollution")
+async def get_air_pollution(
+    city: Optional[str] = None,
+    lat: Optional[float] = None,
+    lon: Optional[float] = None,
+):
+    if not city and (lat is None or lon is None):
+        raise HTTPException(status_code=400, detail="Provide 'city' or 'lat' & 'lon'")
+
+    # First, get coordinates if only city is provided
+    if city:
+        geo_params = {"q": city, "limit": 1, "appid": API_KEY}
+        async with httpx.AsyncClient() as client:
+            geo_res = await client.get("http://api.openweathermap.org/geo/1.0/direct", params=geo_params)
+            if geo_res.status_code != 200 or not geo_res.json():
+                raise HTTPException(status_code=404, detail="City not found")
+            loc = geo_res.json()[0]
+            lat, lon = loc["lat"], loc["lon"]
+
+    # Now get the pollution data
+    poll_params = {"lat": lat, "lon": lon, "appid": API_KEY}
+    async with httpx.AsyncClient() as client:
+        poll_res = await client.get("http://api.openweathermap.org/data/2.5/air_pollution", params=poll_params)
+
+    if poll_res.status_code != 200:
+        raise HTTPException(status_code=500, detail="Pollution service error")
+
+    data = poll_res.json()
+    aqi = data["list"][0]["main"]["aqi"] # 1 = Good, 2 = Fair, 3 = Moderate, 4 = Poor, 5 = Very Poor
+    
+    return {"aqi": aqi}

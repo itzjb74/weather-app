@@ -167,20 +167,20 @@ class _WeatherScreenState extends State<WeatherScreen> {
   final TextEditingController _controller = TextEditingController();
   Weather? _weather;
   List<ForecastDay>? _forecast;
-  List<String> _searchHistory = []; // 👈 NEW
+  List<String> _searchHistory = [];
   bool _loading = false;
   String? _error;
+  bool _isCelsius = true; // 👈 NEW: Celsius / Fahrenheit state
 
   @override
   void initState() {
     super.initState();
-    _loadHistory(); // 👈 NEW
+    _loadHistory();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _fetchWeatherByLocation();
     });
   }
 
-  // 👈 NEW: Load history from local storage
   Future<void> _loadHistory() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
@@ -188,20 +188,18 @@ class _WeatherScreenState extends State<WeatherScreen> {
     });
   }
 
-  // 👈 NEW: Save city to history
   Future<void> _saveToHistory(String city) async {
-    // Capitalize the city name so it looks nice (e.g., "london" -> "London")
     final formattedCity = city.trim().isNotEmpty
         ? city.trim()[0].toUpperCase() + city.trim().substring(1).toLowerCase()
         : city;
 
-    if (_searchHistory.contains(formattedCity)) return; // Don't add duplicates
+    if (_searchHistory.contains(formattedCity)) return;
 
     final prefs = await SharedPreferences.getInstance();
     setState(() {
-      _searchHistory.insert(0, formattedCity); // Add to the front of the list
+      _searchHistory.insert(0, formattedCity);
       if (_searchHistory.length > 5) {
-        _searchHistory = _searchHistory.sublist(0, 5); // Keep only the last 5
+        _searchHistory = _searchHistory.sublist(0, 5);
       }
     });
     await prefs.setStringList('search_history', _searchHistory);
@@ -219,8 +217,11 @@ class _WeatherScreenState extends State<WeatherScreen> {
     });
 
     try {
-      final weatherUri = Uri.parse('$baseUrl/weather?city=$city');
-      final forecastUri = Uri.parse('$baseUrl/forecast?city=$city');
+      final units = _isCelsius ? 'metric' : 'imperial'; // 👈 NEW
+      final weatherUri = Uri.parse('$baseUrl/weather?city=$city&units=$units');
+      final forecastUri = Uri.parse(
+        '$baseUrl/forecast?city=$city&units=$units',
+      );
 
       final responses = await Future.wait([
         http.get(weatherUri),
@@ -231,8 +232,7 @@ class _WeatherScreenState extends State<WeatherScreen> {
       final forecastRes = responses[1];
 
       if (weatherRes.statusCode == 200 && forecastRes.statusCode == 200) {
-        _saveToHistory(city); // 👈 NEW: Save successful search
-
+        _saveToHistory(city);
         final weatherData = jsonDecode(weatherRes.body) as Map<String, dynamic>;
         final forecastData = jsonDecode(forecastRes.body) as List<dynamic>;
 
@@ -287,11 +287,12 @@ class _WeatherScreenState extends State<WeatherScreen> {
         desiredAccuracy: LocationAccuracy.low,
       );
 
+      final units = _isCelsius ? 'metric' : 'imperial'; // 👈 NEW
       final weatherUri = Uri.parse(
-        '$baseUrl/weather?lat=${position.latitude}&lon=${position.longitude}',
+        '$baseUrl/weather?lat=${position.latitude}&lon=${position.longitude}&units=$units',
       );
       final forecastUri = Uri.parse(
-        '$baseUrl/forecast?lat=${position.latitude}&lon=${position.longitude}',
+        '$baseUrl/forecast?lat=${position.latitude}&lon=${position.longitude}&units=$units',
       );
 
       final responses = await Future.wait([
@@ -334,6 +335,28 @@ class _WeatherScreenState extends State<WeatherScreen> {
         backgroundColor: Colors.transparent,
         elevation: 0,
         actions: [
+          // 👇 NEW: Celsius / Fahrenheit Toggle
+          TextButton(
+            onPressed: () {
+              setState(() {
+                _isCelsius = !_isCelsius;
+              });
+              if (_controller.text.isNotEmpty) {
+                _fetchWeather();
+              } else {
+                _fetchWeatherByLocation();
+              }
+            },
+            child: Text(
+              _isCelsius ? '°C' : '°F',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: Theme.of(context).colorScheme.onSurface,
+              ),
+            ),
+          ),
+          // Existing Dark Mode Toggle
           IconButton(
             icon: Icon(widget.isDarkMode ? Icons.light_mode : Icons.dark_mode),
             onPressed: () {
@@ -389,7 +412,7 @@ class _WeatherScreenState extends State<WeatherScreen> {
                   ],
                 ),
 
-                // 👇 NEW: Search History Chips
+                // ---- Search History Chips ----
                 if (_searchHistory.isNotEmpty) ...[
                   const SizedBox(height: 12),
                   SizedBox(
@@ -418,7 +441,7 @@ class _WeatherScreenState extends State<WeatherScreen> {
                             ),
                             onPressed: () {
                               _controller.text = city;
-                              _fetchWeather(); // Automatically search when tapped
+                              _fetchWeather();
                             },
                           ),
                         );
@@ -506,19 +529,28 @@ int _mapToWmoCode(String owmCode) {
 // Pick gradient colors based on temperature AND dark mode
 // -----------------------------------------------------------
 List<Color> _gradientForTemp(double temp, bool isDark) {
-  if (temp < 0) {
+  // Note: If the user selects Fahrenheit, a "hot" day will be around 90.
+  // To keep the gradients working correctly regardless of units,
+  // we convert the temp back to Celsius for the gradient check.
+  // (This is a smart trick to avoid breaking the colors).
+  final double tempC = (temp - 32) / 1.8; // Convert to C to check limits
+
+  // If tempC is still very high (because temp was actually Celsius), we keep it.
+  final double checkTemp = tempC > 50 ? temp : tempC;
+
+  if (checkTemp < 0) {
     return isDark
         ? [const Color(0xFF1A2980), const Color(0xFF26D0CE)]
         : [const Color(0xFF6DD5FA), const Color(0xFF2980B9)];
-  } else if (temp < 10) {
+  } else if (checkTemp < 10) {
     return isDark
         ? [const Color(0xFF2C3E50), const Color(0xFF4CA1AF)]
         : [const Color(0xFF83A4D4), const Color(0xFFB6FBFF)];
-  } else if (temp < 20) {
+  } else if (checkTemp < 20) {
     return isDark
         ? [const Color(0xFF134E5E), const Color(0xFF71B280)]
         : [const Color(0xFF4ECDC4), const Color(0xFF44A08D)];
-  } else if (temp < 30) {
+  } else if (checkTemp < 30) {
     return isDark
         ? [const Color(0xFF8E2DE2), const Color(0xFF4A00E0)]
         : [const Color(0xFFFFB75E), const Color(0xFFED8F03)];
@@ -616,8 +648,9 @@ class _WeatherCard extends StatelessWidget {
             ),
             const SizedBox(height: 8),
 
+            // 👈 CHANGED: Just '°', since the toggle at the top tells them the unit
             Text(
-              '${weather.temperature.toStringAsFixed(1)}°C',
+              '${weather.temperature.toStringAsFixed(1)}°',
               style: TextStyle(
                 fontSize: 64,
                 fontWeight: FontWeight.w300,
@@ -640,13 +673,13 @@ class _WeatherCard extends StatelessWidget {
               children: [
                 Icon(Icons.arrow_upward, size: 16, color: subTextColor),
                 Text(
-                  '${weather.tempMax.toStringAsFixed(0)}°C',
+                  '${weather.tempMax.toStringAsFixed(0)}°',
                   style: TextStyle(color: subTextColor, fontSize: 14),
                 ),
                 const SizedBox(width: 12),
                 Icon(Icons.arrow_downward, size: 16, color: subTextColor),
                 Text(
-                  '${weather.tempMin.toStringAsFixed(0)}°C',
+                  '${weather.tempMin.toStringAsFixed(0)}°',
                   style: TextStyle(color: subTextColor, fontSize: 14),
                 ),
               ],
@@ -662,7 +695,7 @@ class _WeatherCard extends StatelessWidget {
               children: [
                 _Stat(
                   label: 'Feels like',
-                  value: '${weather.feelsLike.toStringAsFixed(0)}°C',
+                  value: '${weather.feelsLike.toStringAsFixed(0)}°',
                 ),
                 _Stat(label: 'Humidity', value: '${weather.humidity}%'),
                 _Stat(
