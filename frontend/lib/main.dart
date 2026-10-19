@@ -10,28 +10,56 @@ import 'package:geolocator/geolocator.dart';
 void main() => runApp(const WeatherApp());
 
 String get baseUrl {
-  if (kIsWeb) return 'http://localhost:8000';
-  if (Platform.isAndroid) {
-    return 'http://192.168.100.13:8000'; // Use your machine's local network IP
-  }
-  return 'http://localhost:8000';
+  return 'https://weather-app-umber-delta-52.vercel.app';
 }
 
-class WeatherApp extends StatelessWidget {
+// -----------------------------------------------------------
+// App Root (Handles Theme State)
+// -----------------------------------------------------------
+class WeatherApp extends StatefulWidget {
   const WeatherApp({super.key});
+
+  @override
+  State<WeatherApp> createState() => _WeatherAppState();
+}
+
+class _WeatherAppState extends State<WeatherApp> {
+  bool _isDarkMode = false;
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Weather',
+      themeMode: _isDarkMode ? ThemeMode.dark : ThemeMode.light,
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: Colors.blue,
+          brightness: Brightness.light,
+        ),
         useMaterial3: true,
       ),
-      home: const WeatherScreen(),
+      darkTheme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: Colors.blue,
+          brightness: Brightness.dark,
+        ),
+        useMaterial3: true,
+      ),
+      home: WeatherScreen(
+        isDarkMode: _isDarkMode,
+        onThemeChanged: (bool isDark) {
+          setState(() {
+            _isDarkMode = isDark;
+          });
+        },
+      ),
     );
   }
 }
 
+// -----------------------------------------------------------
+// Weather Data Model
+// -----------------------------------------------------------
 class Weather {
   final String city;
   final String country;
@@ -47,7 +75,7 @@ class Weather {
   final int visibility;
   final int sunrise;
   final int sunset;
-  final int timezone; // 👈 NEW: Timezone offset in seconds
+  final int timezone;
   final String icon;
 
   Weather({
@@ -65,7 +93,7 @@ class Weather {
     required this.visibility,
     required this.sunrise,
     required this.sunset,
-    required this.timezone, // 👈 NEW
+    required this.timezone,
     required this.icon,
   });
 
@@ -85,14 +113,25 @@ class Weather {
       visibility: json['visibility'] ?? 10000,
       sunrise: json['sunrise'],
       sunset: json['sunset'],
-      timezone: json['timezone'] ?? 0, // 👈 NEW
+      timezone: json['timezone'] ?? 0,
       icon: json['icon'],
     );
   }
 }
 
+// -----------------------------------------------------------
+// Main Screen
+// -----------------------------------------------------------
 class WeatherScreen extends StatefulWidget {
-  const WeatherScreen({super.key});
+  final bool isDarkMode;
+  final ValueChanged<bool> onThemeChanged;
+
+  const WeatherScreen({
+    super.key,
+    required this.isDarkMode,
+    required this.onThemeChanged,
+  });
+
   @override
   State<WeatherScreen> createState() => _WeatherScreenState();
 }
@@ -106,7 +145,6 @@ class _WeatherScreenState extends State<WeatherScreen> {
   @override
   void initState() {
     super.initState();
-    // Auto-fetch weather for the user's current location on launch
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _fetchWeatherByLocation();
     });
@@ -195,8 +233,11 @@ class _WeatherScreenState extends State<WeatherScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Pass the dark mode state to the gradient function
     final gradientColors = _weather != null
-        ? _gradientForTemp(_weather!.temperature)
+        ? _gradientForTemp(_weather!.temperature, widget.isDarkMode)
+        : widget.isDarkMode
+        ? [Colors.blueGrey.shade900, Colors.black]
         : [Colors.blue.shade100, Colors.blue.shade300];
 
     return Scaffold(
@@ -204,6 +245,15 @@ class _WeatherScreenState extends State<WeatherScreen> {
         title: const Text('Weather'),
         backgroundColor: Colors.transparent,
         elevation: 0,
+        actions: [
+          IconButton(
+            icon: Icon(widget.isDarkMode ? Icons.light_mode : Icons.dark_mode),
+            onPressed: () {
+              widget.onThemeChanged(!widget.isDarkMode);
+            },
+            tooltip: 'Toggle Dark Mode',
+          ),
+        ],
       ),
       extendBodyBehindAppBar: true,
       body: AnimatedContainer(
@@ -281,7 +331,7 @@ class _WeatherScreenState extends State<WeatherScreen> {
 }
 
 // -----------------------------------------------------------
-// Map OpenWeatherMap code -> WMO code (for weather_svg_icons)
+// Map OpenWeatherMap code -> WMO code
 // -----------------------------------------------------------
 int _mapToWmoCode(String owmCode) {
   switch (owmCode) {
@@ -318,42 +368,48 @@ int _mapToWmoCode(String owmCode) {
 }
 
 // -----------------------------------------------------------
-// Pick gradient colors based on temperature (°C)
+// Pick gradient colors based on temperature AND dark mode
 // -----------------------------------------------------------
-List<Color> _gradientForTemp(double temp) {
+List<Color> _gradientForTemp(double temp, bool isDark) {
   if (temp < 0) {
-    return [const Color(0xFF6DD5FA), const Color(0xFF2980B9)];
+    return isDark
+        ? [const Color(0xFF1A2980), const Color(0xFF26D0CE)]
+        : [const Color(0xFF6DD5FA), const Color(0xFF2980B9)];
   } else if (temp < 10) {
-    return [const Color(0xFF83A4D4), const Color(0xFFB6FBFF)];
+    return isDark
+        ? [const Color(0xFF2C3E50), const Color(0xFF4CA1AF)]
+        : [const Color(0xFF83A4D4), const Color(0xFFB6FBFF)];
   } else if (temp < 20) {
-    return [const Color(0xFF4ECDC4), const Color(0xFF44A08D)];
+    return isDark
+        ? [const Color(0xFF134E5E), const Color(0xFF71B280)]
+        : [const Color(0xFF4ECDC4), const Color(0xFF44A08D)];
   } else if (temp < 30) {
-    return [const Color(0xFFFFB75E), const Color(0xFFED8F03)];
+    return isDark
+        ? [const Color(0xFF8E2DE2), const Color(0xFF4A00E0)]
+        : [const Color(0xFFFFB75E), const Color(0xFFED8F03)];
   } else {
-    return [const Color(0xFFFF512F), const Color(0xFFDD2476)];
+    return isDark
+        ? [const Color(0xFF870000), const Color(0xFF190A05)]
+        : [const Color(0xFFFF512F), const Color(0xFFDD2476)];
   }
 }
 
 // -----------------------------------------------------------
-// Format a Unix timestamp using the city's timezone offset
+// Format Time
 // -----------------------------------------------------------
 String _formatTime(int unixSeconds, int timezoneOffsetSeconds) {
-  // Add the city's offset to the UTC timestamp
   final int adjustedSeconds = unixSeconds + timezoneOffsetSeconds;
-
-  // Create DateTime in UTC so Dart doesn't apply the device's local timezone
   final dt = DateTime.fromMillisecondsSinceEpoch(
     adjustedSeconds * 1000,
     isUtc: true,
   );
-
   final hh = dt.hour.toString().padLeft(2, '0');
   final mm = dt.minute.toString().padLeft(2, '0');
   return '$hh:$mm';
 }
 
 // -----------------------------------------------------------
-// Convert wind direction in degrees to a compass point
+// Wind Direction
 // -----------------------------------------------------------
 String _windDirection(int degrees) {
   const directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
@@ -362,7 +418,7 @@ String _windDirection(int degrees) {
 }
 
 // -----------------------------------------------------------
-// Format visibility: meters -> "10 km" or "850 m"
+// Visibility
 // -----------------------------------------------------------
 String _formatVisibility(int meters) {
   if (meters >= 1000) {
@@ -372,7 +428,7 @@ String _formatVisibility(int meters) {
 }
 
 // -----------------------------------------------------------
-// Weather card
+// Weather Card (Updated for Dark Mode Glassmorphism)
 // -----------------------------------------------------------
 class _WeatherCard extends StatelessWidget {
   final Weather weather;
@@ -380,13 +436,28 @@ class _WeatherCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    // Text color that adapts (Black for light mode, White for dark mode)
+    final textColor = isDark ? Colors.white : Colors.black87;
+    final subTextColor = isDark ? Colors.grey[400] : Colors.grey[700];
+
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.85),
+        // Glassmorphism effect: transparent white in light mode, transparent black in dark mode
+        color: isDark
+            ? Colors.black.withValues(alpha: 0.4)
+            : Colors.white.withValues(alpha: 0.85),
         borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.1)
+              : Colors.transparent,
+          width: 1,
+        ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.1),
+            color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.1),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -398,7 +469,11 @@ class _WeatherCard extends StatelessWidget {
           children: [
             Text(
               '${weather.city}, ${weather.country}',
-              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+                color: textColor,
+              ),
             ),
             const SizedBox(height: 16),
 
@@ -411,33 +486,44 @@ class _WeatherCard extends StatelessWidget {
 
             Text(
               '${weather.temperature.toStringAsFixed(1)}°C',
-              style: const TextStyle(fontSize: 64, fontWeight: FontWeight.w300),
+              style: TextStyle(
+                fontSize: 64,
+                fontWeight: FontWeight.w300,
+                color: textColor,
+              ),
             ),
 
             Text(
               weather.description.toUpperCase(),
-              style: const TextStyle(fontSize: 16, letterSpacing: 1.5),
+              style: TextStyle(
+                fontSize: 16,
+                letterSpacing: 1.5,
+                color: textColor,
+              ),
             ),
 
             const SizedBox(height: 8),
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(Icons.arrow_upward, size: 16, color: Colors.grey[700]),
+                Icon(Icons.arrow_upward, size: 16, color: subTextColor),
                 Text(
                   '${weather.tempMax.toStringAsFixed(0)}°C',
-                  style: TextStyle(color: Colors.grey[700], fontSize: 14),
+                  style: TextStyle(color: subTextColor, fontSize: 14),
                 ),
                 const SizedBox(width: 12),
-                Icon(Icons.arrow_downward, size: 16, color: Colors.grey[700]),
+                Icon(Icons.arrow_downward, size: 16, color: subTextColor),
                 Text(
                   '${weather.tempMin.toStringAsFixed(0)}°C',
-                  style: TextStyle(color: Colors.grey[700], fontSize: 14),
+                  style: TextStyle(color: subTextColor, fontSize: 14),
                 ),
               ],
             ),
 
-            const Divider(height: 40),
+            Divider(
+              height: 40,
+              color: isDark ? Colors.white24 : Colors.black12,
+            ),
 
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -467,7 +553,10 @@ class _WeatherCard extends StatelessWidget {
               ],
             ),
 
-            const Divider(height: 40),
+            Divider(
+              height: 40,
+              color: isDark ? Colors.white24 : Colors.black12,
+            ),
 
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -475,18 +564,12 @@ class _WeatherCard extends StatelessWidget {
                 _StatWithIcon(
                   icon: Icons.wb_twilight,
                   label: 'Sunrise',
-                  value: _formatTime(
-                    weather.sunrise,
-                    weather.timezone,
-                  ), // 👈 Updated
+                  value: _formatTime(weather.sunrise, weather.timezone),
                 ),
                 _StatWithIcon(
                   icon: Icons.nights_stay_outlined,
                   label: 'Sunset',
-                  value: _formatTime(
-                    weather.sunset,
-                    weather.timezone,
-                  ), // 👈 Updated
+                  value: _formatTime(weather.sunset, weather.timezone),
                 ),
               ],
             ),
@@ -497,6 +580,9 @@ class _WeatherCard extends StatelessWidget {
   }
 }
 
+// -----------------------------------------------------------
+// Stat with Icon
+// -----------------------------------------------------------
 class _StatWithIcon extends StatelessWidget {
   final IconData icon;
   final String label;
@@ -509,21 +595,32 @@ class _StatWithIcon extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = isDark ? Colors.white : Colors.black87;
+    final subTextColor = isDark ? Colors.grey[400] : Colors.grey[600];
+
     return Column(
       children: [
-        Icon(icon, color: Colors.orange[700], size: 24),
+        Icon(icon, color: Colors.orange[400], size: 24),
         const SizedBox(height: 4),
-        Text(label, style: TextStyle(color: Colors.grey[600], fontSize: 12)),
+        Text(label, style: TextStyle(color: subTextColor, fontSize: 12)),
         const SizedBox(height: 2),
         Text(
           value,
-          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+            color: textColor,
+          ),
         ),
       ],
     );
   }
 }
 
+// -----------------------------------------------------------
+// Basic Stat
+// -----------------------------------------------------------
 class _Stat extends StatelessWidget {
   final String label;
   final String value;
@@ -531,13 +628,21 @@ class _Stat extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = isDark ? Colors.white : Colors.black87;
+    final subTextColor = isDark ? Colors.grey[400] : Colors.grey[600];
+
     return Column(
       children: [
-        Text(label, style: TextStyle(color: Colors.grey[600], fontSize: 12)),
+        Text(label, style: TextStyle(color: subTextColor, fontSize: 12)),
         const SizedBox(height: 4),
         Text(
           value,
-          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+            color: textColor,
+          ),
         ),
       ],
     );
