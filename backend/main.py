@@ -1,5 +1,5 @@
 import os
-import fastapi # type: ignore
+from fastapi import FastAPI, HTTPException # type: ignore
 import fastapi.middleware.cors # type: ignore
 import httpx # type: ignore
 from dotenv import load_dotenv # type: ignore
